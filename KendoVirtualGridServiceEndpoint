@@ -1,0 +1,177 @@
+<cfcomponent displayName="KendoVirtualGridServiceEndpoint" output="yes" hint="Example endpiont to use when creating Kendo virtualized grids">
+	
+<!-- Set these properties as needed. -->
+<cfset dsn = "WorldDb">
+<cfset KendoUtilsObj = "blog.demo.KendoUtils">
+<cfset DbColumnProperyObj = "blog.demo.ColumnProperty">
+
+<!--- Function to populate the grid --->
+<cffunction name="getWorldDbForKendoGrid" access="remote" returnformat="json" output="false">
+    <!--- There are no arguments for this function. --->
+	<cfsetting enablecfoutputonly="true" />
+    
+    <!--- Set params --->
+    <cfparam name="take" default="100" type="string">
+    <cfparam name="skip" default="0" type="string">
+    <cfparam name="page" default="1" type="string">
+    <cfparam name="pageSize" default="100" type="string">
+    <cfparam name="whereClause" default="" type="string">
+    <cfparam name="sortStatement" default="" type="string">
+    <cfparam name="searchFilter" default="false" type="boolean">
+    <cfparam name="logSql" default="true" type="boolean">
+    
+    <!--- The name of the view (or a table that is derived from a view. --->
+    <cfset tableName = 'ViewCountryStateCity'>
+    <cfset tableNameAlias = 'vCountryStateCity'>
+    <cfset primaryKey = "CityId">
+	<cfset defaultOrderByStatement = 'ORDER BY Country'>
+    
+    <!--- Get the number of records in the entire table, not just the top 100 for display purposes. We will overwrite this later if there are any new filters applied.  --->
+    <cfquery name="getTotal" datasource="#dsn#">
+    	SELECT count(#primaryKey#) as numRecords FROM [dbo].[#tableName#]
+    </cfquery> 
+    <cfset totalNumRecords = getTotal.numRecords>
+    
+    <!--- Make the query. Input the select statement *without* the from clause (or any other clauses) here. --->
+    <cfset sqlStatement = '
+		SELECT * FROM
+			( 	SELECT
+                CountryId
+				,Country
+				,Capital
+				,Currency
+				,CurrencyName
+				,ISO2
+				,ISO3
+				,Flag
+				,Latitude
+				,Longitude
+				,StateId
+				,State
+				,StateFlag
+				,Type
+				,CityId
+				,City
+				,CityLatitude
+				,CityLongitude
+				,CityFlag
+	'>
+
+	<!--- Note: you should not have to touch the following lines of this code. If you want a custom query name other than 'data', you will have to adjust tthe query name in two places.  --->
+	
+	<!---
+	Get the HTTP request body content.
+	The content in the request body should be formatted like so: {"take":100,"skip":9300,"page":94,"pageSize":100,"sort":[{"field":"ref2","dir":"desc"}]}
+	
+	NOTE: We have to use toString() as an intermediary method
+	call since the JSON packet comes across as a byte array
+	(binary data) which needs to be turned back into a string before
+	ColdFusion can parse it as a JSON value.
+	--->
+	<cfset requestBody = toString( getHttpRequestData().content ) />
+	
+	<!--- Double-check to make sure it's a JSON value. --->
+	<cfif isJSON( requestBody )>
+		<!--- Deserialize the json in the request body.  --->
+		<cfset incomingJson = deserializeJSON( requestBody )>
+		
+        <!--- Invoke the createSqlForVirtualGrid method in the kendoUtils.cfc component that will send back sql clauses.  --->
+        <cfinvoke component="#KendoUtilsObj#" method="createSqlForVirtualGrid" returnvariable="sqlStruct">
+            <cfinvokeargument name="jsonString" value="#requestBody#">
+            <cfinvokeargument name="dsn" value="#dsn#">
+            <cfinvokeargument name="tableName" value="#tableName#">
+        </cfinvoke>
+        
+        <cfif structFind(sqlStruct, "take") neq ''>
+			<cfset take = structFind(sqlStruct, "take")>
+        </cfif>
+        <cfif structFind(sqlStruct, "skip") neq ''>
+            <cfset skip = structFind(sqlStruct, "skip")>
+        </cfif>
+        <cfif structFind(sqlStruct, "page") neq ''>
+            <cfset page = structFind(sqlStruct, "page")>
+        </cfif>
+        <cfif structFind(sqlStruct, "pageSize") neq ''>
+            <cfset pageSize = structFind(sqlStruct, "pageSize")>
+        </cfif>
+        <cfif structFind(sqlStruct, "whereClause") neq ''>
+            <cfset whereClause = structFind(sqlStruct, "whereClause")>
+        </cfif>
+        <cfif structFind(sqlStruct, "sortStatement") neq ''>
+            <cfset sortStatement = structFind(sqlStruct, "sortStatement")>
+        </cfif>
+        <cfif structFind(sqlStruct, "searchFilter") neq ''>
+            <cfset searchFilter = structFind(sqlStruct, "searchFilter")>
+        </cfif>
+	</cfif><!--- <cfif isJSON( requestBody )> --->
+    
+	<!--- Build the over order by statement. Make sure that a closing bracket ')' is at the end of the string. --->
+    <cfset overOrderStatement = ',ROW_NUMBER() OVER ('>
+	<cfif sortStatement neq ''>
+    	<cfset overOrderStatement = overOrderStatement & sortStatement & ")">
+    <cfelse>
+    	<!--- Default order by.  --->
+        <cfset overOrderStatement = overOrderStatement & defaultOrderByStatement & ")">
+    </cfif>
+    <!--- Append it to the sqlStatement --->
+    <cfset sqlStatement = sqlStatement & " " & overOrderStatement>
+    <!--- Build the alias for the rownumber(). I am defaulting to 'as rowNumber' --->
+    <cfset sqlStatement = sqlStatement & " AS RowNumber">
+    <!--- Append the real and alias table name --->
+    <cfset sqlStatement = sqlStatement & " FROM [dbo].[" & tableName & "]) " & tableNameAlias>
+            
+	<!--- Append the additional WHERE clause statement to it if necessary --->
+    <cfif whereClause neq ''>
+        <cfset sqlStatement = sqlStatement & " " & preserveSingleQuotes(whereClause)>
+    </cfif>
+    
+    <!--- Log the sql when the logSql is set to true (on top of function) ---> 
+    <!--- <cfif logSql>
+		<cfset filePath = subledgerPath & 'logs'>
+        <cffile action="append" addnewline="yes" file="#filePath#/virtualGridSql.txt" output="#Chr(13)##Chr(10)#'#myTrim(sqlStatement)#'#Chr(13)##Chr(10)#" fixnewline="yes">
+    </cfif> --->
+    
+    <!--- Testing carriage. If this is not commented out, the grids will not populate.  --->
+    <cfoutput>#preserveSingleQuotes(whereClause)#</cfoutput>
+	
+    <cfquery name="data" datasource="#dsn#">
+    	#preserveSingleQuotes(sqlStatement)#
+    </cfquery>
+    
+    <!--- Write the sql to the console log for debugging. Note: if you write this out- it will break the grid, so only do so in development.
+	<cfoutput>
+    <script>
+		if ( window.console && window.console.log ) {
+		  // console is available
+		  console.log ('#preserveSingleQuotes(sqlStatement)#');
+		}
+	</script> 
+    </cfoutput>
+	 --->
+                
+    <!--- Using my jsonArray.cfc --->
+    <cfinvoke component="#application.cfJsonComponentPath#" method="convertCfQuery2JsonStructForVirtualGrid" returnvariable="jsonString" >
+        <cfinvokeargument name="queryObj" value="#data#">
+        <cfinvokeargument name="includeTotal" value="true">
+        <!--- When we use server side paging, we need to override the total and specify a new total which is the sum of the entire query. --->
+        <cfinvokeargument name="overRideTotal" value="true">
+        <!--- We set the totalNumRecords near the top of the function, however, if the filters were applied, the new total will be the number of records in the data query object. ---> 
+        <cfif searchFilter>
+        	<cfset totalRecords = data.recordcount>
+        <cfelse>
+        	<cfset totalRecords = totalNumRecords>
+        </cfif>
+        <cfinvokeargument name="newTotal" value="#totalRecords#">
+        <!--- The includeDataHandle is used when the format is json (or jsonp), however, the data handle is not included when you want to make a javascript object embedded in the page. ---> 
+        <cfinvokeargument name="includeDataHandle" value="true">
+        <!--- If the data handle is not used, this can be left blank. If you are going to use a service on the cfc, typically, the value would be 'data'--->
+        <cfinvokeargument name="dataHandleName" value="data">
+		<!--- Keep the case of the columns the same as the database --->
+        <cfinvokeargument name="convertColumnNamesToLowerCase" value="false">
+    </cfinvoke>
+
+	<cfreturn jsonString>
+    
+</cffunction>
+			
+</cfcomponent>
