@@ -10,7 +10,7 @@
     <cfargument name="logSql" type="boolean" default="true" hint="Logs the sql statement for debugging purposes">
     <cfargument name="logFilePath" type="string" default="" hint="Where do you want to log to be saved?">
 
-	<cfsetting enablecfoutputonly="true" />
+    <cfsetting enablecfoutputonly="true" />
     
     <!--- Set params --->
     <cfparam name="take" default="100" type="string">
@@ -31,10 +31,8 @@
 	Get the HTTP request body content.
 	The content in the request body should be formatted like so: {"take":100,"skip":9300,"page":94,"pageSize":100,"sort":[{"field":"ref2","dir":"desc"}]}
 	
-	NOTE: We have to use toString() as an intermediary method
-	call since the JSON packet comes across as a byte array
-	(binary data) which needs to be turned back into a string before
-	ColdFusion can parse it as a JSON value.
+	NOTE: use the toString() as the JSON packet comes across as a byte array
+	(binary data) before ColdFusion can parse it as a JSON value.
 	--->
 	<cfset requestBody = toString( getHttpRequestData().content ) />
 	
